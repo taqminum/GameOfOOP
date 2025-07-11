@@ -17,64 +17,98 @@ inline void putimage_alpha(int x, int y, IMAGE* img, BYTE alpha = 255)
 		GetImageHDC(img), 0, 0, img->getwidth(), img->getheight(), bf);
 }
 
+class Atlas//Animation之间共享
+{
+	public:
+		Atlas(LPCTSTR path, int num)
+		{
+			TCHAR path_file[256];
+			for (size_t i = 1;i <= num;i++)
+			{
+				_stprintf_s(path_file, path, i);
+
+				IMAGE* frame = new IMAGE();
+				loadimage(frame, path_file);
+				frame_list.push_back(frame);
+			}
+		}
+		~Atlas()
+		{
+			for (size_t i = 0;i < frame_list.size();i++)
+			{
+				delete frame_list[i];
+			}
+		}
+	public:
+		std::vector<IMAGE*> frame_list;
+};
+
+Atlas* atlas_player_left;
+Atlas* atlas_player_right;
+Atlas* atlas_enemy_left;
+Atlas* atlas_enmey_right;
+
+
+
 class Animation
 {
 public:
-	Animation(LPCTSTR path, int num, int interval)//path是文件路径，num是动画的帧数,interval是帧之间的间隔.构造函数负责load
+	Animation(Atlas* atlas, int interval)//path是文件路径，num是动画的帧数,interval是帧之间的间隔.构造函数负责load
 	{
+		anim_atlas = atlas;
 		interval_ms = interval;
-
-		TCHAR path_file[256];
-		for (size_t i = 1;i <= num;i++)
-		{
-			_stprintf_s(path_file, path, i);
-
-			IMAGE* frame = new IMAGE();
-			loadimage(frame, path_file);
-			frame_list.push_back(frame);
-		}
 	}
 
-	~Animation()
-	{
-		for (size_t i = 0;i < frame_list.size();i++)
-		{
-			delete frame_list[i];
-		}
-	}
+	~Animation() = default;
 
 	void Play(int x, int y, int delta)
 	{
+		// 直接访问图集中的帧列表
+		if (anim_atlas->frame_list.empty()) return;
+
 		timer += delta;
 
-		bool isLastFrame = (idx_frame == frame_list.size() - 1);
+		// 检查是否为最后一帧
+		bool isLastFrame = (idx_frame == anim_atlas->frame_list.size() - 1);
+
+		// 最后一帧停留时间稍长（50%延长）
 		int currentInterval = isLastFrame ? interval_ms * 3 / 2 : interval_ms;
 
-		// 计算进度百分比
+		// 计算动画进度百分比 (0.0 - 1.0)
 		float progress = static_cast<float>(timer) / currentInterval;
 
+		// 进度超过100%，切换到下一帧
 		if (progress >= 1.0f)
 		{
-			idx_frame = (idx_frame + 1) % frame_list.size();
+			idx_frame = (idx_frame + 1) % anim_atlas->frame_list.size();
 			timer = 0;
 			progress = 0.0f;
 		}
 
-		// 添加帧过渡效果（最后20%时间）
+		// 添加帧过渡效果（在最后20%时间内混合两帧）
 		if (progress > 0.8f)
 		{
-			int nextFrame = (idx_frame + 1) % frame_list.size();
+			// 计算下一帧索引（循环）
+			int nextFrame = (idx_frame + 1) % anim_atlas->frame_list.size();
+
+			// 计算混合因子 (0.0 - 1.0)
 			float blendFactor = (progress - 0.8f) / 0.2f;
 
+			// 当前帧透明度逐渐降低
+			BYTE currentAlpha = static_cast<BYTE>(255 * (1.0f - blendFactor));
+			// 下一帧透明度逐渐增加
+			BYTE nextAlpha = static_cast<BYTE>(255 * blendFactor);
+
 			// 绘制当前帧（逐渐透明）
-			putimage_alpha(x, y, frame_list[idx_frame], static_cast<BYTE>(255 * (1 - blendFactor)));
+			putimage_alpha(x, y, anim_atlas->frame_list[idx_frame], currentAlpha);
 
 			// 绘制下一帧（逐渐显现）
-			putimage_alpha(x, y, frame_list[nextFrame], static_cast<BYTE>(255 * blendFactor));
+			putimage_alpha(x, y, anim_atlas->frame_list[nextFrame], nextAlpha);
 		}
 		else
 		{
-			putimage_alpha(x, y, frame_list[idx_frame]);
+			// 普通绘制（不透明）
+			putimage_alpha(x, y, anim_atlas->frame_list[idx_frame]);
 		}
 	}
 
@@ -82,7 +116,8 @@ private:
 	int timer = 0;//动画计时器
 	int idx_frame = 0;//动画帧索引
 	int interval_ms = 0;
-	std::vector<IMAGE*> frame_list;
+private:
+	Atlas* anim_atlas;
 };
 
 
@@ -91,8 +126,8 @@ class Player
 	public:
 		Player()
 		{
-			anim_left = new Animation(_T("image/Wizard_left_%d.png"), 9, 35);
-			anim_right = new Animation(_T("image/Wizard_right_%d.png"), 9, 35);
+			anim_left = new Animation(atlas_player_left,35);
+			anim_right = new Animation(atlas_player_right, 35);
 
 		}
 		~Player()
@@ -200,8 +235,8 @@ class Bullet//子弹，武器
 
 		void Draw() const
 		{
-			setlinecolor(RGB(255, 155, 50));
-			setfillcolor(RGB(200, 75, 10));
+			setlinecolor(RGB(255, 255, 255));
+			setfillcolor(RGB(255, 255, 255));
 			fillcircle(position.x, position.y, RADIUS);
 		}
 	private:
@@ -212,8 +247,8 @@ class Enemy
 	public:
 		Enemy()
 		{
-			anim_left = new Animation(_T("image/actor1_left_%d.png"), 4, 45);
-			anim_right = new Animation(_T("image/actor1_right_%d.png"), 4, 45);
+			anim_left = new Animation(atlas_enemy_left,45);
+			anim_right = new Animation(atlas_enmey_right, 45);
 
 			//敌人生成边界
 			enum class EmergeEDGE
@@ -352,11 +387,17 @@ int main()
 {
 	initgraph(1280, 1280, 0);
 
+	atlas_player_left = new Atlas(_T("image/Wizard_left_%d.png"), 9);
+	atlas_player_right= new Atlas(_T("image/Wizard_right_%d.png"), 9);
+	atlas_enemy_left= new Atlas(_T("image/actor1_left_%d.png"), 4);
+	atlas_enmey_right= new Atlas(_T("image/actor1_right_%d.png"), 4);//后面记得delete这些指针
+
 	//音乐部分
 	mciSendString(_T("open mus/bgm.mp3 alias bgm"), NULL, 0, NULL);//加载
 	mciSendString(_T("open mus/hit.mp3 alias hit"), NULL, 0, NULL);
+	mciSendString(_T("open mus/fail.mp3 alias fail"), NULL, 0, NULL);
 
-	mciSendString(_T("play bgm repeat from 0"), NULL, 0, NULL);//播放
+	mciSendString(_T("play bgm repeat from 0"), NULL, 0, NULL);//播放背景音乐
 
 
 	bool running = true;
@@ -399,6 +440,7 @@ int main()
 				static TCHAR text[64];
 				_stprintf_s(text, _T("玩家得分：%d"), score);
 				MessageBox(GetHWnd(), _T("Game Over"),_T("失败了"), MB_OK);
+				mciSendString(_T("play fail from 0"), NULL, 0, NULL);
 				running =false;
 				break;
 			}
@@ -448,6 +490,10 @@ int main()
 			Sleep(1000 / 144 - delta_time);
 		}
 	}
+	delete atlas_enemy_left;
+	delete atlas_enmey_right;
+	delete atlas_player_left;
+	delete atlas_player_right;
 
 	EndBatchDraw();
 
