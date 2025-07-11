@@ -439,7 +439,7 @@ int main()
 			{
 				static TCHAR text[64];
 				_stprintf_s(text, _T("玩家得分：%d"), score);
-				MessageBox(GetHWnd(), _T("Game Over"),_T("失败了"), MB_OK);
+				MessageBox(GetHWnd(), text , _T("Game Over"), MB_OK);
 				mciSendString(_T("play fail from 0"), NULL, 0, NULL);
 				running =false;
 				break;
